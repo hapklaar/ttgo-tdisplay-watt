@@ -1,0 +1,200 @@
+esphome:
+  name: ttgo-tdisplay-watt
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_secret
+
+ota:
+  password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "AP ${node_name}"
+    password: !secret wifi_ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+
+font:
+  - file: 'fonts/slkscr.ttf'
+    id: font_slkscr_8
+    size: 8
+    glyphs: "!%()+,-/_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz"
+  - file: 'fonts/slkscr.ttf'
+    id: font_slkscr_16
+    size: 16
+    glyphs: "!%()+,-/_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz"
+  - file: 'fonts/BebasNeue-Regular.ttf'
+    id: font_bebas_48
+    size: 48
+  - file: 'fonts/BebasNeue-Regular.ttf'
+    id: font_bebas_56
+    size: 56
+  - file: 'fonts/BebasNeue-Regular.ttf'
+    id: font_bebas_96
+    size: 96
+  - file: 'fonts/arial.ttf'
+    id: font_arial_12
+    size: 12
+  - file: 'fonts/arial.ttf'
+    id: font_arial_16
+    size: 16
+
+color:
+  - id: color_red
+    red: 1
+    green: 0
+    blue: 0
+  - id: color_green
+    red: 0
+    green: 1
+    blue: 0
+  - id: color_blue
+    red: 0
+    green: 0
+    blue: 1
+  - id: color_orange
+    red: 1
+    green: 0.6
+    blue: 0
+  - id: color_teal_blue
+    red: 0
+    green: 0.5
+    blue: 0.45
+    
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO19
+
+time:
+  - platform: homeassistant
+    id: esptime
+    
+binary_sensor:
+
+  - platform: gpio
+    pin:
+      number: GPIO35
+      inverted: true
+    id: tdisplay_button_input_1
+    on_click:
+      then:
+        - homeassistant.service:
+            service: lock.unlock
+            data:
+              entity_id: lock.z_wave_controlled_door_lock_with_bluetooth_smart
+
+  - platform: gpio
+    pin:
+      number: GPIO0
+      inverted: true
+    id: tdisplay_button_input_0
+    on_click:
+      then:
+        - homeassistant.service:
+            service: lock.lock
+            data:
+              entity_id: lock.z_wave_controlled_door_lock_with_bluetooth_smart
+
+  - platform: status
+    name: "Node Status"
+    id: system_status              
+
+# We can still control the backlight independently
+switch:
+  - platform: gpio
+    pin: GPIO4
+    name: "Backlight"
+    id: backlight              
+
+sensor:
+
+  - platform: homeassistant
+    id: dsmr_power_consumption
+    entity_id: sensor.power_consumption
+    unit_of_measurement: 'kW'
+    filters:
+      - multiply: 1000
+
+  - platform: adc
+    pin: 34
+    attenuation: 11db
+    filters:
+      - multiply: 2
+    name: VBatt
+    id: vcc
+    update_interval: 10s
+
+  - platform: template
+    name: batterylevel
+    id: batterylevel
+    unit_of_measurement: '%'
+    update_interval: 10s
+    lambda: |-
+      //return ((id(vcc).state /4.2) * 100.00);
+      return ((id(vcc).state -3) /1.2 * 100.00);    
+text_sensor:
+  - platform: homeassistant
+    id: lock_status
+    entity_id: lock.z_wave_controlled_door_lock_with_bluetooth_smart
+    
+
+# TODO brightness
+display:
+  - platform: st7789v
+    backlight_pin: GPIO4
+    cs_pin: GPIO5
+    dc_pin: GPIO16
+    reset_pin: GPIO23
+    rotation: 90°
+    brightness: 25%
+    update_interval: 5s
+    lambda: |-
+      if (id(vcc).has_state()) {
+        it.printf(4, 4, id(font_arial_16), id(color_teal_blue), "%.2f V (%.2f %%)", id(vcc).state, id(batterylevel).state);
+      }
+      if (id(lock_status).has_state()) {
+        if (id(lock_status).state == "locked") {      
+          it.print(192, 4, id(font_arial_16), id(color_red), "Unlock");
+        } else {
+      it.print(205, 120, id(font_arial_16), id(color_green), "Lock");
+        }
+      it.strftime(4, 120, id(font_arial_16), "%Y-%m-%d %H:%M:%S", id(esptime).now());
+      
+      if (id(dsmr_power_consumption).has_state()) {
+        float pwr = id(dsmr_power_consumption).state;
+        if (pwr > 1000.0) {
+          it.printf(10, 18, id(font_bebas_96), id(color_red), "%.0f W", id(dsmr_power_consumption).state);
+        } else {
+        if (pwr > 750.0) {
+          it.printf(10, 18, id(font_bebas_96), id(color_orange), "%.0f W", id(dsmr_power_consumption).state);
+        } else {
+        it.printf(10, 18, id(font_bebas_96), id(color_green), "%.0f W", id(dsmr_power_consumption).state);
+         }
+        }
+      }
+      
+      //if (id(lock_status).has_state()) {
+        //if (id(lock_status).state == "locked") {
+          //it.printf(100, 120, id(font_arial_16), id(color_green), "%s", id(lock_status).state.c_str());
+        //} else {
+      //it.printf(100, 120, id(font_arial_16), id(color_red), "%s", id(lock_status).state.c_str());
+        //}
+        
+      }
